@@ -123,6 +123,8 @@ def parse_file(file):
     df = pd.DataFrame(parse_msgs(file), columns=["date", "time", "channel", "username", "message"])
     bans = pd.DataFrame(parse_bans(file), columns=[
                         "date", "time", "channel", "username", "ban_type"])
+    # this takes up 99% of the computation time
+    # TODO: do this more efficiently
     for index, row in bans.iterrows():
         handle_ban(row, df)
 
@@ -152,13 +154,10 @@ def __main__():
         pool = mp.Pool()
 
     # iterate over input_dirs in parallel
-    results = []
     for log in os.listdir(args.logs_dir):
         log_path = args.logs_dir / log
-        # r = pool.apply_async(parse_file, args=(log_path,),
-        #                     callback=save_result, error_callback=print)
-        pool.apply_async(parse_file, args=(log_path,))
-        # results.append(r)
+        pool.apply_async(parse_file, args=(log_path,),
+                         callback=save_result, error_callback=print)
 
     pool.close()
     pool.join()
