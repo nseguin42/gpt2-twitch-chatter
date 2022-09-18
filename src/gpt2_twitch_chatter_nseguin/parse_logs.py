@@ -86,6 +86,21 @@ ban_pattern = r"\[(\d{4}-\d{2}-\d{1,2}) (\d{2}:\d{2}:\d{2})\] #(\w+) (\w+) has b
 ban_prog = re.compile(ban_pattern)
 
 
+def recent_messages(row, df):
+    return df[(df["channel"] == row["channel"]) & (df["date"] == row["date"]) & (df["time"] < row["time"])].tail(100)
+
+
+def handle_ban(row, df):
+    if "minutes" in row["ban_type"] or "seconds" in row["ban_type"]:
+        # get index of user messages within 100 messages of the ban, then drop them
+        recent = recent_messages(row, df).where(df["username"] == row["username"]).dropna()
+        df = df.drop(recent.index)
+    else:
+        # drop user messages from the day of the ban
+        df = df.mask((df["username"] == row["username"]) & (
+            df["date"] == row["date"]) & (df["time"] < row["time"])).dropna()
+
+
 def parse_msgs(file):
     df = pd.DataFrame(columns=["date", "time", "channel", "username", "message"])
     for line in read_lines(file):
@@ -104,13 +119,14 @@ def parse_bans(file):
             yield groups
 
 
-def make_df(file):
-    return pd.DataFrame(parse_msgs(file), columns=["date", "time", "channel", "username", "message"])
-
-
 def parse_file(file):
-    df = make_df(file)
-    print("Finished parsing file: ", file)
+    df = pd.DataFrame(parse_msgs(file), columns=["date", "time", "channel", "username", "message"])
+    bans = pd.DataFrame(parse_bans(file), columns=[
+                        "date", "time", "channel", "username", "ban_type"])
+    for index, row in bans.iterrows():
+        handle_ban(row, df)
+
+    print("Finished parsing file:", file.name)
     return df, file
 
 
@@ -121,6 +137,9 @@ def save_result(result):
         df.to_csv(out_path, index=False)
         if args.v:
             print("Saving file: ", out_path)
+    else:
+        # print out the df
+        print(df)
 
 
 def __main__():
@@ -136,9 +155,10 @@ def __main__():
     results = []
     for log in os.listdir(args.logs_dir):
         log_path = args.logs_dir / log
-        r = pool.apply_async(parse_file, args=(log_path,),
-                             callback=save_result, error_callback=print)
-        results.append(r)
+        # r = pool.apply_async(parse_file, args=(log_path,),
+        #                     callback=save_result, error_callback=print)
+        pool.apply(parse_file, args=(log_path,))
+        # results.append(r)
 
     pool.close()
     pool.join()
