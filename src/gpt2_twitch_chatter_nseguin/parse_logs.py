@@ -157,7 +157,7 @@ def __main__():
         log_path = args.logs_dir / log
         # r = pool.apply_async(parse_file, args=(log_path,),
         #                     callback=save_result, error_callback=print)
-        pool.apply(parse_file, args=(log_path,))
+        pool.apply_async(parse_file, args=(log_path,))
         # results.append(r)
 
     pool.close()
