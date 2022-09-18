@@ -199,7 +199,10 @@ def chunk_generator(df):
 
 
 def tokenize_df(df, file):
-    return pd.DataFrame(chunk_generator(df)), file
+    tokenized_df = pd.DataFrame(chunk_generator(df))
+    # rename "labels" to "input_ids" for compatibility with the Transformers library
+    tokenized_df["labels"] = tokenized_df["input_ids"]
+    return tokenized_df, file
 
 
 def prepare_tokenized_data():
