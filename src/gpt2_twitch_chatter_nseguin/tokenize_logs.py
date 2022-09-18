@@ -10,8 +10,9 @@ from datasets import Dataset, concatenate_datasets
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(
-    description='Parse raw twitch logs and save them as a .csv.'
+    description='Tokenize parsed Twitch logs created with parse_logs.py and save a DatasetDict.'
 )
+
 parser.add_argument(
     '--data_dir',
     type=pathlib.Path,
@@ -21,12 +22,12 @@ parser.add_argument(
 parser.add_argument(
     '--logs_dir',
     type=pathlib.Path,
-    help='Path of directory containing raw logs if data_dir is unset.',
+    help='Path of directory containing processed logs if data_dir is unset.',
 )
 parser.add_argument(
     '--output_dir',
     type=pathlib.Path,
-    help='Path of directory to save .csv files to if data_dir is unset.',
+    help='Path of directory to save tokenized datasets to if data_dir is unset.',
 )
 parser.add_argument(
     '-v',
@@ -117,13 +118,14 @@ def pad_chunk(chunk, num_pad_tokens):
                        constant_values=tokenizer.pad_token_id)
     attention_mask = np.pad(chunk.attention_mask, (0, num_pad_tokens), constant_values=-100)
     padded_chunk = pd.Series([input_ids, attention_mask], index=["input_ids", "attention_mask"])
+
     return padded_chunk
 
 
 # make sure the input_ids and attention_mask are at most 512 tokens long
 # note: pass the row as a pd.Series, not a pd.DataFrame.
 def truncate_chunk(chunk):
-    assert type(chunk) == pd.Series
+    # assert type(chunk) == pd.Series
 
     # remove an extra char and replace it with EOS token
     input_ids = chunk["input_ids"][:block_size - 1]
@@ -134,24 +136,33 @@ def truncate_chunk(chunk):
 
 
 # pad or truncate the chunk to the block size
-# and make sure it starts/ends with EOS/BOS tokens
-def resize_chunk(chunk):
+# and make sure it ends with the EOS token
+def finish_chunk(chunk):
     # chunk["inupt_ids"] might be passed as a list or nparray
     # so we need to handle both cases
+    chunk = add_eos_token(chunk)
     try:
         chunk_length = chunk["input_ids"].shape[0]
     except:
         chunk_length = len(chunk["input_ids"])
-    num_pad_tokens = block_size - chunk_length
 
-    if num_pad_tokens > 0:
-        chunk = add_eos_token(chunk)
-        chunk = pad_chunk(chunk, num_pad_tokens)
-        return chunk
+    #padded = False
+    #truncated = False
+
+    if chunk_length < block_size:
+        chunk = pad_chunk(chunk, block_size - chunk_length)
+        #padded = True
     else:
-        return truncate_chunk(chunk)
+        chunk = truncate_chunk(chunk)
+        #truncated = True
+
+    # make sure our chunks are all the right length
+    # assert len(chunk["input_ids"]
+    #           ) == block_size, f'chunk length is {len(chunk["input_ids"]), chunk["input_ids"]}, {padded}, {truncated}'
+    return chunk.transpose()
 
 
+# yield each df and the filename it came from
 def iterate_dfs(logs_dir):
     for log_file in logs_dir.glob('*.csv'):
         if args.v:
@@ -159,25 +170,28 @@ def iterate_dfs(logs_dir):
         df = pd.read_csv(log_file)
         yield df, log_file
 
+
 # yield a single line of chat
-
-
 def iterate_rows(df):
     for row in df.iterrows():
         yield row
 
 
-# yield a pd.Series with input_ids and attention_mask keys with length 512
+# yield a single input sequence for the model
 def chunk_generator(df):
     chunk = make_fresh_chunk()
     for idx, row in df.iterrows():
-        # truncate to 510 tokens to make room for newline and EOS tokens
-        tokenized = tokenizer(row["message"], truncation=True,
-                              max_length=block_size - 3, add_special_tokens=False)
-        # make sure to leave room for the eos token
-        if len(chunk.input_ids) + len(tokenized.input_ids) > 511:
+        # truncate individual lines, leaving 3 tokens to make room for newline and BOS/EOS tokens
+        tokenized = tokenizer(
+            row["message"],
+            truncation=True,
+            max_length=block_size-3,
+            add_special_tokens=False
+        )
+        # make sure to leave room for the final newline and eos token
+        if len(chunk.input_ids) + len(tokenized.input_ids) >= block_size - 1:
             # we can't add the row, so finish the chunk and yield it
-            yield resize_chunk(chunk).transpose()
+            yield finish_chunk(chunk)
             # start the next chunk with a BOS token
             chunk = make_fresh_chunk()
         # add the row to the chunk
@@ -193,9 +207,8 @@ def prepare_tokenized_data():
 
     def log_result(result):
         df, file = result
-        file = file.name
         if args.v:
-            print("Finished processing {} ({} chunks)".format(file, len(df)))
+            print("Finished processing {} ({} chunks)".format(file.name, len(df)))
         # convert to Dataset
         dataset = Dataset.from_pandas(df, split="train")
         result_list.append(dataset)
@@ -203,7 +216,8 @@ def prepare_tokenized_data():
     pool = mp.Pool(processes=numprocs)
 
     for df, log_file in iterate_dfs(args.logs_dir):
-        pool.apply_async(tokenize_df, args=(df, log_file,), callback=log_result)
+        pool.apply_async(tokenize_df, args=(df, log_file,),
+                         callback=log_result, error_callback=print)
     pool.close()
 
     # wait for all processes to finish
