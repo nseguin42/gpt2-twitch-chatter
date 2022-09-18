@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpt2_twitch_chatter_nseguin"
+version = "0.0.1"
+authors = [
+    { name = "Nick Seguin", email="nseguin42@gmail.com" },
+]
+description = "A GPT-2 model fine-tuned on Twitch chat messages, plus a generation pipeline"
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: POSIX :: Linux",
+    Environment :: GPU :: NVIDIA CUDA,
+    Development Status :: 4 - Beta,
+]
+
+[project.urls]
+"Homepage" = "https://github.com/nseguin42/gpt2-twitch-chatter"
+"Bug Tracker" = "https://github.com/nseguin42/gpt2-twitch-chatter/issues"
