@@ -183,6 +183,9 @@ def clean_file(in_path, out_path):
 
 def save_result(result):
     clean, out_path, orig_len, clean_len = result
+    # prevent div by 0
+    if orig_len == 0:
+        return
     if not args.d:
         save_df(clean, out_path)
     if args.v:
@@ -191,8 +194,8 @@ def save_result(result):
 
 
 def __main__():
-    if args.v:
-        num_logs = count_logs()
+    # TODO: add warning/confirmation for large batches consuming a lot of memory
+    num_logs = count_logs()
 
     if args.n:
         pool = mp.Pool(processes=args.n)
