@@ -6,7 +6,7 @@ import multiprocessing as mp
 import argparse
 import pathlib
 import os
-from datasets import Dataset, concatenate_datasets
+from datasets import Dataset, Features, Sequence, Value, concatenate_datasets
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(
@@ -95,7 +95,7 @@ def splice_arrays(ar1, ar2, sep):
 
 # begin a new chunk with just a BOS token
 def make_fresh_chunk():
-    return pd.Series({"input_ids": np.array([tokenizer.bos_token_id], dtype=np.int32), "attention_mask": np.array([1], dtype=np.int32)})
+    return pd.Series({"input_ids": np.array([tokenizer.bos_token_id]), "attention_mask": np.array([1])})
 
 
 # appends row to chunk and returns the new chunk
@@ -107,7 +107,8 @@ def add_row_to_chunk(chunk, row):
 
 # appends an EOS token with attention mask 1 to the end of the chunk
 def add_eos_token(chunk):
-    input_ids = splice_arrays(chunk.input_ids, np.array([tokenizer.eos_token_id]), newline_token)
+    input_ids = splice_arrays(chunk.input_ids, np.array(
+        [tokenizer.eos_token_id]), newline_token)
     attention_mask = splice_arrays(chunk.attention_mask, np.array([1]), 1)
     return pd.Series([input_ids, attention_mask], index=["input_ids", "attention_mask"])
 
@@ -116,8 +117,10 @@ def add_eos_token(chunk):
 def pad_chunk(chunk, num_pad_tokens):
     input_ids = np.pad(chunk.input_ids, (0, num_pad_tokens),
                        constant_values=tokenizer.pad_token_id)
-    attention_mask = np.pad(chunk.attention_mask, (0, num_pad_tokens), constant_values=-100)
-    padded_chunk = pd.Series([input_ids, attention_mask], index=["input_ids", "attention_mask"])
+    attention_mask = np.pad(chunk.attention_mask, (0, num_pad_tokens),
+                            constant_values=-100)
+    padded_chunk = pd.Series([input_ids, attention_mask], index=[
+                             "input_ids", "attention_mask"])
 
     return padded_chunk
 
@@ -165,8 +168,6 @@ def finish_chunk(chunk):
 # yield each df and the filename it came from
 def iterate_dfs(logs_dir):
     for log_file in logs_dir.glob('*.csv'):
-        if args.v:
-            print("Tokenizing {}".format(log_file.name))
         df = pd.read_csv(log_file)
         yield df, log_file
 
@@ -199,6 +200,8 @@ def chunk_generator(df):
 
 
 def tokenize_df(df, file):
+    if args.v:
+        print("Tokenizing {}".format(file.name))
     tokenized_df = pd.DataFrame(chunk_generator(df))
     # rename "labels" to "input_ids" for compatibility with the Transformers library
     tokenized_df["labels"] = tokenized_df["input_ids"]
@@ -212,8 +215,14 @@ def prepare_tokenized_data():
         df, file = result
         if args.v:
             print("Finished processing {} ({} chunks)".format(file.name, len(df)))
-        # convert to Dataset
-        dataset = Dataset.from_pandas(df, split="train")
+
+        # convert to Dataset with int32 dtypes
+        features = Features({
+            "input_ids": Sequence(Value("int32")),
+            "labels": Sequence(Value("int32")),
+            "attention_mask": Sequence(Value("int32"))
+        })
+        dataset = Dataset.from_pandas(df, split="train", features=features)
         result_list.append(dataset)
 
     pool = mp.Pool(processes=numprocs)
